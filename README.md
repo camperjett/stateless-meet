@@ -19,7 +19,7 @@ You can mute/ unmute your mic and turn on/ off your cam! <br>
 
 ## Live Website
 
-http://camp-code-1.vercel.app/
+https://stateless-meet.vercel.app/
 
 ## Run Locally
 
