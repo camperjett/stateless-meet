@@ -184,7 +184,7 @@ const Room = () => {
     const unsub = () => {
       console.log("DDDD");
       socket.current = io.connect(
-        "localhost:5000"
+        "https://backend-stateless.herokuapp.com/"
       );
       console.log("done connection");
       socket.current.on("message", (data) => {
