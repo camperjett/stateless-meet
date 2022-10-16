@@ -2,7 +2,6 @@ import React, { useEffect, useState } from "react";
 import { useRef } from "react";
 
 import { useNavigate, useParams } from "react-router-dom";
-
 import { useReactMediaRecorder } from "react-media-recorder";
 // icons
 import { IoChatboxOutline as ChatIcon } from "react-icons/io5";
@@ -14,9 +13,7 @@ import { MdCallEnd as CallEndIcon } from "react-icons/md";
 import { MdClear as ClearIcon } from "react-icons/md";
 import { AiOutlineLink as LinkIcon } from "react-icons/ai";
 import { MdOutlineContentCopy as CopyToClipboardIcon } from "react-icons/md";
-import { MdScreenShare as ScreenShareIcon } from "react-icons/md";
-import { MdStopScreenShare as StopScreenShareIcon } from "react-icons/md";
-
+// import { MdScreenShare as ScreenShareIcon } from "react-icons/md";
 import { IoVideocamSharp as VideoOnIcon } from "react-icons/io5";
 import { IoVideocamOff as VideoOffIcon } from "react-icons/io5";
 import { AiOutlineShareAlt as ShareIcon } from "react-icons/ai";
@@ -33,21 +30,25 @@ import MeetGridCard from "../components/MeetGridCard";
 // framer motion
 import { motion, AnimatePresence } from "framer-motion";
 
+// importing audios
+import joinSFX from "../sounds/join.mp3";
+import msgSFX from "../sounds/message.mp3";
+import leaveSFX from "../sounds/leave.mp3";
+
 // simple peer
 import Peer from "simple-peer";
 import { io } from "socket.io-client";
 import { useAuth } from "../context/AuthContext";
 import Loading from "../components/Loading";
-import MeetGridCardUser from "../components/MeetGridCardUser";
 
 const Room = () => {
   const [loading, setLoading] = useState(true);
   const [localStream, setLocalStream] = useState(null);
-  const [screenStream, setScreenStream] = useState(null);
   const navigate = useNavigate();
   const [micOn, setMicOn] = useState(true);
-  const [showChat, setshowChat] = useState(()=>{return window.innerWidth > 768});
+  const [showChat, setshowChat] = useState(true);
   const [share, setShare] = useState(false);
+  const [joinSound] = useState(new Audio(joinSFX));
   const { roomID } = useParams();
   const chatScroll = useRef();
   const [pin, setPin] = useState(false);
@@ -55,9 +56,8 @@ const Room = () => {
   const socket = useRef();
   const peersRef = useRef([]);
   const [record, setRecord] = useState(0);
-  
+
   const [videoActive, setVideoActive] = useState(true);
-  const [screenShareActive, setScreenShareActive] = useState(false);
 
   const [msgs, setMsgs] = useState([]);
   const [msgText, setMsgText] = useState("");
@@ -65,9 +65,9 @@ const Room = () => {
 
   // user
   const { user, login } = useAuth();
-  
+
   const [particpentsOpen, setParticpentsOpen] = useState(true);
-  
+
   const { status, startRecording, stopRecording, mediaBlobUrl } =
     useReactMediaRecorder({ audio: true, screen: true });
 
@@ -90,6 +90,7 @@ const Room = () => {
       console.error(err);
     }
   }
+
   const sendMessage = (e) => {
     e.preventDefault();
     if (msgText) {
@@ -107,89 +108,18 @@ const Room = () => {
     setMsgText("");
   };
 
-  const handleStream = (stream) => {
-  }
-
-  const handlePeers = (stream) => {
-    console.log("handlePeer");
-    setLoading(false);
-    setLocalStream(stream)
-    localVideo.current.srcObject = stream;
-    const myStream = localVideo.current.srcObject;
-    socket.current.emit("join room", {
-      roomID,
-      user: user
-        ? {
-          uid: user?.uid,
-          email: user?.email,
-          name: user?.displayName,
-          photoURL: user?.photoURL,
-        }
-        : null,
-    });
-    socket.current.on("all users", (users) => {
-      const peers = [];
-      users.forEach((user) => {
-        const peer = createPeer(user.userId, socket.current.id, myStream);
-        peersRef.current.push({
-          peerID: user.userId,
-          peer,
-          user: user.user,
-        });
-        peers.push({
-          peerID: user.userId,
-          peer,
-          user: user.user,
-        });
-      });
-      setPeers(peers);
-    });
-
-    socket.current.on("user joined", (payload) => {
-      // console.log(payload);
-      const peer = addPeer(payload.signal, payload.callerID, myStream);
-      peersRef.current.push({
-        peerID: payload.callerID,
-        peer,
-        user: payload.user,
-      });
-
-      const peerObj = {
-        peerID: payload.callerID,
-        peer,
-        user: payload.user,
-      };
-
-      setPeers((users) => [...users, peerObj]);
-    });
-
-    socket.current.on("receiving returned signal", (payload) => {
-      const item = peersRef.current.find(
-        (p) => p.peerID === payload.id
-      );
-      item.peer.signal(payload.signal);
-    });
-
-    socket.current.on("user left", (id) => {
-      const peerObj = peersRef.current.find((p) => p.peerID === id);
-      if (peerObj) peerObj.peer.destroy();
-      const peers = peersRef.current.filter((p) => p.peerID !== id);
-      peersRef.current = peers;
-      setPeers((users) => users.filter((p) => p.peerID !== id));
-    });
-  }
-
   useEffect(() => {
-    console.log("RUN");
     const unsub = () => {
-      console.log("DDDD");
       socket.current = io.connect(
         "https://backend-stateless.herokuapp.com/"
+        // "localhost:5000"
       );
       console.log("done connection");
       socket.current.on("message", (data) => {
+        const audio = new Audio(msgSFX);
         if (user?.uid !== data.user.id) {
           console.log("send");
+          audio.play();
         }
         const msg = {
           send: user?.uid === data.user.id,
@@ -199,11 +129,80 @@ const Room = () => {
         // setMsgs(data);
         // console.log(data);
       });
-      if (user) navigator.mediaDevices.getUserMedia({
-        video: true,
-        audio: true,
-      })
-        .then(handlePeers);
+      if (user)
+        navigator.mediaDevices
+          .getUserMedia({
+            video: true,
+            audio: true,
+          })
+          .then((stream) => {
+            setLoading(false);
+            setLocalStream(stream);
+            localVideo.current.srcObject = stream;
+            socket.current.emit("join room", {
+              roomID,
+              user: user
+                ? {
+                    uid: user?.uid,
+                    email: user?.email,
+                    name: user?.displayName,
+                    photoURL: user?.photoURL,
+                  }
+                : null,
+            });
+            socket.current.on("all users", (users) => {
+              const peers = [];
+              users.forEach((user) => {
+                const peer = createPeer(user.userId, socket.current.id, stream);
+                peersRef.current.push({
+                  peerID: user.userId,
+                  peer,
+                  user: user.user,
+                });
+                peers.push({
+                  peerID: user.userId,
+                  peer,
+                  user: user.user,
+                });
+              });
+              setPeers(peers);
+            });
+
+            socket.current.on("user joined", (payload) => {
+              // console.log(payload);
+              const peer = addPeer(payload.signal, payload.callerID, stream);
+              peersRef.current.push({
+                peerID: payload.callerID,
+                peer,
+                user: payload.user,
+              });
+
+              const peerObj = {
+                peerID: payload.callerID,
+                peer,
+                user: payload.user,
+              };
+
+              setPeers((users) => [...users, peerObj]);
+            });
+
+            socket.current.on("receiving returned signal", (payload) => {
+              const item = peersRef.current.find(
+                (p) => p.peerID === payload.id
+              );
+              item.peer.signal(payload.signal);
+            });
+
+            socket.current.on("user left", (id) => {
+              const audio = new Audio(leaveSFX);
+              audio.play();
+              const peerObj = peersRef.current.find((p) => p.peerID === id);
+              if (peerObj) peerObj.peer.destroy();
+              const peers = peersRef.current.filter((p) => p.peerID !== id);
+              peersRef.current = peers;
+              setPeers((users) => users.filter((p) => p.peerID !== id));
+            });
+          });
     };
     return unsub();
   }, [user, roomID]);
@@ -222,11 +221,11 @@ const Room = () => {
         signal,
         user: user
           ? {
-            uid: user?.uid,
-            email: user?.email,
-            name: user?.displayName,
-            photoURL: user?.photoURL,
-          }
+              uid: user?.uid,
+              email: user?.email,
+              name: user?.displayName,
+              photoURL: user?.photoURL,
+            }
           : null,
       });
     });
@@ -243,6 +242,7 @@ const Room = () => {
     peer.on("signal", (signal) => {
       socket.current.emit("returning signal", { signal, callerID });
     });
+    joinSound.play();
     peer.signal(incomingSignal);
     return peer;
   };
@@ -273,15 +273,78 @@ const Room = () => {
                   >
                     <motion.div
                       layout
-                      className={`grid grid-cols-1 gap-4  ${showChat
-                        ? "md:grid-cols-2"
-                        : "lg:grid-cols-3 sm:grid-cols-2"
-                        } `}
+                      className={`grid grid-cols-1 gap-4  ${
+                        showChat
+                          ? "md:grid-cols-2"
+                          : "lg:grid-cols-3 sm:grid-cols-2"
+                      } `}
                     >
+                      <motion.div
+                        layout
+                        className={`relative bg-lightGray rounded-lg aspect-video overflow-hidden ${
+                          pin &&
+                          "md:col-span-2 md:row-span-2 md:col-start-1 md:row-start-1"
+                        }`}
+                      >
+                        <div className="absolute top-4 right-4 z-20">
+                          <button
+                            className={`${
+                              pin
+                                ? "bg-blue border-transparent"
+                                : "bg-slate-800/70 backdrop-blur border-gray"
+                            } md:border-2 border-[1px] aspect-square md:p-2.5 p-1.5 cursor-pointer md:rounded-xl rounded-lg text-white md:text-xl text-lg`}
+                            onClick={() => setPin(!pin)}
+                          >
+                            {pin ? <PinActiveIcon /> : <PinIcon />}
+                          </button>
+                        </div>
 
-                      <MeetGridCardUser localVideo={localVideo} user={user} videoActive={videoActive} />
+                        <video
+                          ref={localVideo}
+                          muted
+                          autoPlay
+                          controls={false}
+                          className="h-full w-full object-cover rounded-lg"
+                        />
+                        {!videoActive && (
+                          <div className="absolute top-0 left-0 bg-lightGray h-full w-full flex items-center justify-center">
+                            <img
+                              className="h-[35%] max-h-[150px] w-auto rounded-full aspect-square object-cover"
+                              src={user?.photoURL}
+                              alt={user?.displayName}
+                            />
+                          </div>
+                        )}
 
-                      {/* other meeting members */}
+                        <div className="absolute bottom-4 right-4">
+                          {/* <button
+                          className={`${
+                            micOn
+                              ? "bg-blue border-transparent"
+                              : "bg-slate-800/70 backdrop-blur border-gray"
+                          } border-2  p-2 cursor-pointer rounded-xl text-white text-xl`}
+                          onClick={() => {
+                            const audio =
+                              localVideo.current.srcObject.getAudioTracks()[0];
+                            if (micOn) {
+                              audio.enabled = false;
+                              setMicOn(false);
+                            }
+                            if (!micOn) {
+                              audio.enabled = true;
+                              setMicOn(true);
+                            }
+                          }}
+                        >
+                          {micOn ? <MicOnIcon /> : <MicOffIcon />}
+                        </button> */}
+                        </div>
+                        <div className="absolute bottom-4 left-4">
+                          <div className="bg-slate-800/70 backdrop-blur border-gray border-2  py-1 px-3 cursor-pointer rounded-md text-white text-xs">
+                            {user?.displayName}
+                          </div>
+                        </div>
+                      </motion.div>
                       {peers.map((peer) => (
                         // console.log(peer),
                         <MeetGridCard
@@ -297,10 +360,11 @@ const Room = () => {
                       <div className="flex gap-2">
                         <div>
                           <button
-                            className={`${micOn
-                              ? "bg-blue border-transparent"
-                              : "bg-slate-800/70 backdrop-blur border-gray"
-                              } border-2  p-2 cursor-pointer rounded-xl text-white text-xl`}
+                            className={`${
+                              micOn
+                                ? "bg-blue border-transparent"
+                                : "bg-slate-800/70 backdrop-blur border-gray"
+                            } border-2  p-2 cursor-pointer rounded-xl text-white text-xl`}
                             onClick={() => {
                               const audio =
                                 localVideo.current.srcObject.getAudioTracks()[0];
@@ -319,10 +383,11 @@ const Room = () => {
                         </div>
                         <div>
                           <button
-                            className={`${videoActive
-                              ? "bg-blue border-transparent"
-                              : "bg-slate-800/70 backdrop-blur border-gray"
-                              } border-2  p-2 cursor-pointer rounded-xl text-white text-xl`}
+                            className={`${
+                              videoActive
+                                ? "bg-blue border-transparent"
+                                : "bg-slate-800/70 backdrop-blur border-gray"
+                            } border-2  p-2 cursor-pointer rounded-xl text-white text-xl`}
                             onClick={() => {
                               const videoTrack = localStream
                                 .getTracks()
@@ -338,57 +403,16 @@ const Room = () => {
                             {videoActive ? <VideoOnIcon /> : <VideoOffIcon />}
                           </button>
                         </div>
-                        <div>
+                        {/* <div>
                           <button
-                            className={`${screenShareActive
-                              ? "bg-blue border-transparent"
-                              : "bg-slate-800/70 backdrop-blur border-gray"
-                              } border-2  p-2 cursor-pointer rounded-xl text-white text-xl`}
-                            onClick={() => {
-                              if (screenShareActive) {
-                                // screenStream.getTracks()
-                                //   .forEach(track => track.stop())
-                              } else {
-                                if (navigator.mediaDevices.getDisplayMedia) {
-                                  navigator.mediaDevices.getDisplayMedia({ video: true, audio: true })
-                                    .then(handleStream)
-                                    .then((stream) => { })
-                                    .catch((e) => console.log(e))
-                                }
-                              }
-                              console.log(screenStream);
-                              setScreenShareActive(!screenShareActive);
-                            }}
+                            className={`bg-blue border-transparent
+           border-2  p-2 cursor-pointer rounded-xl text-white text-xl`}
                           >
-                            {screenShareActive ? <ScreenShareIcon /> : <StopScreenShareIcon />}
+                            <UsersIcon />
                           </button>
-                        </div>
+                        </div> */}
                       </div>
-                      <div className="flex-grow flex justify-center">
-                        <button
-                          className="py-2 px-4 flex items-center gap-2 rounded-lg bg-red"
-                          onClick={() => {
-                            navigate("/");
-                            window.location.reload();
-                          }}
-                        >
-                          <CallEndIcon size={20} />
-                          <span className="hidden sm:block text-xs">
-                            End Call
-                          </span>
-                        </button>
-                      </div>
-                      <div className="flex gap-2">
-                        <div>
-                          <button
-                            className={`bg-slate-800/70 backdrop-blur border-gray
-          border-2  p-2 cursor-pointer rounded-xl text-white text-xl`}
-                            onClick={() => setShare(true)}
-                          >
-                            <ShareIcon size={22} />
-                          </button>
-                        </div>
-                        <div>
+                      <div>
                           <button
                             className={`${(record === 1)
                               ? "bg-blue border-transparent"
@@ -408,12 +432,45 @@ const Room = () => {
                             {record ? <RecordIcon /> : <StopRecordIcon />}
                           </button>
                         </div>
+                      <div className="flex-grow flex justify-center">
+                        <button
+                          className="py-2 px-4 flex items-center gap-2 rounded-lg bg-red"
+                          onClick={() => {
+                            navigate("/");
+                            window.location.reload();
+                          }}
+                        >
+                          <CallEndIcon size={20} />
+                          <span className="hidden sm:block text-xs">
+                            End Call
+                          </span>
+                        </button>
+                      </div>
+                      <div className="flex gap-2">
+                        {/* <div>
+                          <button
+                            className={`bg-slate-800/70 backdrop-blur border-gray
+          border-2  p-2 cursor-pointer rounded-xl text-white text-xl`}
+                          >
+                            <ScreenShareIcon size={22} />
+                          </button>
+                        </div> */}
                         <div>
                           <button
-                            className={`${showChat
-                              ? "bg-blue border-transparent"
-                              : "bg-slate-800/70 backdrop-blur border-gray"
-                              } border-2  p-2 cursor-pointer rounded-xl text-white text-xl`}
+                            className={`bg-slate-800/70 backdrop-blur border-gray
+          border-2  p-2 cursor-pointer rounded-xl text-white text-xl`}
+                            onClick={() => setShare(true)}
+                          >
+                            <ShareIcon size={22} />
+                          </button>
+                        </div>
+                        <div>
+                          <button
+                            className={`${
+                              showChat
+                                ? "bg-blue border-transparent"
+                                : "bg-slate-800/70 backdrop-blur border-gray"
+                            } border-2  p-2 cursor-pointer rounded-xl text-white text-xl`}
                             onClick={() => {
                               setshowChat(!showChat);
                             }}
@@ -446,16 +503,18 @@ const Room = () => {
                           </div>
                           <div className="ml-2 text-sm font">Particpents</div>
                           <div
-                            className={`${particpentsOpen && "rotate-180"
-                              } transition-all  ml-auto text-lg`}
+                            className={`${
+                              particpentsOpen && "rotate-180"
+                            } transition-all  ml-auto text-lg`}
                           >
                             <DownIcon />
                           </div>
                         </div>
                         <motion.div
                           layout
-                          className={`${particpentsOpen ? "block" : "hidden"
-                            } flex flex-col w-full mt-2 h-full max-h-[50vh] overflow-y-scroll gap-3 p-2 bg-blue-600`}
+                          className={`${
+                            particpentsOpen ? "block" : "hidden"
+                          } flex flex-col w-full mt-2 h-full max-h-[50vh] overflow-y-scroll gap-3 p-2 bg-blue-600`}
                         >
                           <AnimatePresence>
                             <motion.div
@@ -530,10 +589,11 @@ const Room = () => {
                               initial={{ x: msg.send ? 100 : -100, opacity: 0 }}
                               animate={{ x: 0, opacity: 1 }}
                               transition={{ duration: 0.08 }}
-                              className={`flex gap-2 ${msg?.user.id === user?.uid
-                                ? "flex-row-reverse"
-                                : ""
-                                }`}
+                              className={`flex gap-2 ${
+                                msg?.user.id === user?.uid
+                                  ? "flex-row-reverse"
+                                  : ""
+                              }`}
                               key={index}
                             >
                               <img
