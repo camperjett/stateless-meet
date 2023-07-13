@@ -111,7 +111,7 @@ const Room = () => {
   useEffect(() => {
     const unsub = () => {
       socket.current = io.connect(
-        "https://backend-stateless.herokuapp.com/"
+        "https://backend-1o6p.onrender.com/"
         // "localhost:5000"
       );
       console.log("done connection");
